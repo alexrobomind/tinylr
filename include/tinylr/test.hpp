@@ -15,7 +15,7 @@ namespace tinylr {
 		std::cout << "LR" << std::endl;
 		for(size_t i = 0; i < mat.dim(); ++i) {
 			for(size_t j = 0; j < mat.dim(); ++j) {
-				std::cout << "  " << mat.pat(i, j);
+				std::cout << "  " << mat.at(i, j);
 			}
 			std::cout << std::endl;
 		}
@@ -27,11 +27,12 @@ namespace tinylr {
 		
 		for(size_t i = 0; i < mat.dim(); ++i) {
 			for(size_t j = 0; j < mat.dim(); ++j) {
-				Mat::Number accum = 0;
+				using Num = typename Mat::Number;
+				Num accum = 0;
 				
 				for(size_t k = 0; k <= i && k <= j; ++k) {
-					const Mat::Number l_element = k == i ? 1.0 / mat.pat(k, k) : mat.pat(i, k);
-					const Mat::Number r_element = k == j ? 1.0 : mat.pat(k, j);
+					const Num l_element = (k == i && Mat::invert_diagonal) ? 1.0 / mat.at(k, k) : mat.at(i, k);
+					const Num r_element = k == j ? 1.0 : mat.at(k, j);
 					
 					accum += l_element * r_element;
 				}

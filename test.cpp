@@ -6,23 +6,23 @@
 int main(int argc, char** argv) {
 	auto mat = tinylr::make_matrix<
 		double,
-		tinylr::pivot::none
+		tinylr::pivot::absmax
 	>(
-		tinylr::dim::fixed<4>()
+		tinylr::dim::fixed<3>()
 		//tinylr::dim::dynamic(4)
 	);
 	
 	mat.at(0, 0) = 0;
 	mat.at(1, 0) = 1;
-	//mat.at(2, 0) = 0;
+	mat.at(2, 0) = 0;
 	
 	mat.at(0, 1) = 1;
 	mat.at(1, 1) = 1;
-	//mat.at(2, 1) = 0;
+	mat.at(2, 1) = 0;
 	
-	//mat.at(0, 2) = 0;
-	//mat.at(1, 2) = 0;
-	//mat.at(2, 2) = -1;
+	mat.at(0, 2) = 0;
+	mat.at(1, 2) = 0;
+	mat.at(2, 2) = -1;
 	
 	tinylr::print(mat);
 	

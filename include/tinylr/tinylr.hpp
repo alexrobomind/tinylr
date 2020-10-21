@@ -3,12 +3,14 @@
 
 #include <array>
 #include <vector>
+#include <cmath>
 
 namespace tinylr {
 	namespace pivot {
 		enum strategy {
 			none = 0,
-			absmax = 1
+			absmax = 1,
+			absmax_swap = 2
 		};
 	}
 	
@@ -58,6 +60,11 @@ namespace tinylr {
 		 */
 		template<typename T, typename Dim, pivot::strategy strat>
 		struct PivotEngine {
+			static_assert(sizeof(T) == 0, "Unknown pivot strategy");
+		};
+		
+		template<typename T, typename Dim>
+		struct PivotEngine<T, Dim, pivot::absmax> {
 			typename Dim::template Vector<size_t> store;
 			
 			PivotEngine(const Dim& d) :
@@ -74,11 +81,11 @@ namespace tinylr {
 			 */
 			template<typename Mat>
 			void pivot(size_t col, Mat& mat) {				
-				T num = std::abs(mat.pat(col, col));
+				T num = std::abs(mat.at(col, col));
 				size_t choice = col;
 				
 				for(size_t i = col + 1; i < store.size(); ++i) {
-					T num2 = mat.pat(i, col);
+					T num2 = mat.at(i, col);
 					
 					if(std::abs(num2) > num) {
 						num = num2;
@@ -91,6 +98,46 @@ namespace tinylr {
 			
 			/** Reads the stored pivot permutation */
 			size_t get(size_t n) const { return store[n]; }
+			size_t get_at(size_t n) const { return store[n]; }
+		};
+		
+		/** Pivot engine variant that implements the same pivoting strategy as above,
+		 *  but does not install an indirection when accessing the data buffer. Instead
+		 *  swaps the rows in the data buffer */
+		template<typename T, typename Dim>
+		struct PivotEngine<T, Dim, pivot::absmax_swap> {
+			typename Dim::template Vector<size_t> store;
+			
+			PivotEngine(const Dim& d) :
+				store(d.template create_vector<size_t>())
+			{
+				for(size_t i = 0; i < d.dim(); ++i)
+					store[i] = i;
+			}
+			template<typename Mat>
+			void pivot(size_t col, Mat& mat) {				
+				T num = std::abs(mat.at(col, col));
+				size_t choice = col;
+				
+				for(size_t i = col + 1; i < store.size(); ++i) {
+					T num2 = mat.at(i, col);
+					
+					if(std::abs(num2) > num) {
+						num = num2;
+						choice = i;
+					}
+				}
+				
+				std::swap(store[col], store[choice]);
+				
+				for(size_t j = 0; j < store.size(); ++j) {
+					std::swap(mat.at_raw(col, j), mat.at_raw(choice, j));
+				}
+			}
+			
+			/** Reads the stored pivot permutation */
+			size_t get(size_t n) const { return store[n]; }
+			size_t get_at(size_t n) const { return n; }
 		};
 		
 		/** Implementation of pivot engine that performs
@@ -105,6 +152,7 @@ namespace tinylr {
 			{}
 			
 			size_t get(size_t n) const { return n; }
+			size_t get_at(size_t n) const { return n; }
 		};
 	}
 	
@@ -115,10 +163,12 @@ namespace tinylr {
 		auto dynamic(size_t dim) { return internal::DynamicDimension(dim); }
 	}
 	
-	template<typename Num, typename Dim, pivot::strategy pstrat>
+	template<typename Num, typename Dim, pivot::strategy pstrat, bool inv_diag>
 	struct Matrix {
 		using Number = Num;
 		using Storage = typename Dim::template Matrix<Num>;
+		
+		static constexpr bool invert_diagonal = inv_diag;
 		
 		Storage data;
 		
@@ -134,30 +184,44 @@ namespace tinylr {
 		size_t dim() const { return dimm.dim(); }
 		size_t pivot(size_t i) const { return pivots.get(i); }
 		
-		Num& pat(size_t i, size_t j) {
-			return at(pivots.get(i), j);
+		/** Access to the data view provided by the pivot engine */
+		Num& at(size_t i, size_t j) {
+			return at_raw(pivots.get_at(i), j);
 		}
 		
-		Num& at(size_t i, size_t j) {
+		/** Raw data buffer access. Safe to use before calling lr_inplace. DO
+		 *  NOT USE AFTERWARDS. The storage layout is pivot engine dependent.
+		 *  Use at(...) instead.
+		 */
+		Num& at_raw(size_t i, size_t j) {
 			return data[dimm.dim() * i + j];
 		}
 		
-		const Num& pat(size_t i, size_t j) const {
-			return at(pivots.get(i), j);
+		const Num det() {
+			Num result = 1;
+			for(size_t i = 0; i < dimm.dim(); ++i)
+				result *= at(i, i);
+			return invert_diagonal ? 1.0 / result : result;
+		}
+		
+		const Num inv_det() {
+			Num result = 1;
+			for(size_t i = 0; i < dimm.dim(); ++i)
+				result *= at(i, i);
+			return invert_diagonal ? result : 1.0 / result;
 		}
 		
 		const Num& at(size_t i, size_t j) const {
+			return at_raw(pivots.get_at(i), j);
+		}
+		
+		const Num& at_raw(size_t i, size_t j) const {
 			return data[dimm.dim() * i + j];
 		}
 		
 		void lr_inplace() {
 			for(size_t i = 0; i < dimm.dim(); ++i)
-				process_step<true>(i);
-		}
-		
-		void lr_inplace_noinvert() {
-			for(size_t i = 0; i < dimm.dim(); ++i)
-				process_step<false>(i);
+				process_step(i);
 		}
 		
 		template<typename Tin, typename Tout>
@@ -174,31 +238,30 @@ namespace tinylr {
 		}
 		
 	private:
-		template<bool invert>
 		void process_step(size_t step) {
 			pivots.pivot(step, *this);
 			
 			// Normalize the row of the U matrix so that diagonal is 1
 			{
-				const Num lead = pat(step, step);
+				const Num lead = at(step, step);
 				const Num invlead = 1 / lead;
 				
 				for(size_t col = step + 1; col < dimm.dim(); ++col)
-					pat(step, col) *= invlead;
+					at(step, col) *= invlead;
 				
 				// Store the inverse diagonal element of L matrix in diagonal of store
 				//  (We don't need the diagonal itself for forward substitution)
-				if(invert)
-					pat(step, step) = invlead;
+				if(invert_diagonal)
+					at(step, step) = invlead;
 			}
 			
 			// Subtract for all lower rows multiple of this row so that their column element
 			// goes to 0. This row is already normalized, so no division neccessary.
 			for(size_t row = step + 1; row < dimm.dim(); ++row) {
-				const Num lead = pat(row, step);
+				const Num lead = at(row, step);
 				
 				for(size_t col = step + 1; col < dimm.dim(); ++col) {
-					pat(row, col) -= lead * pat(step, col);
+					at(row, col) -= lead * at(step, col);
 				}
 			}
 		}
@@ -209,10 +272,13 @@ namespace tinylr {
 				// Divide by diagonal of L matrix
 				// Since we store the the inverse diagonal, we have
 				// to multiply by the stored value.
-				temp[i] *= pat(i, i);
+				if(invert_diagonal)
+					temp[i] *= at(i, i);
+				else
+					temp[i] /= at(i, i);
 				
 				for(size_t j = i + 1; j < dimm.dim(); ++j) {
-					temp[j] -= temp[i] * pat(j, i);
+					temp[j] -= temp[i] * at(j, i);
 				}
 			}
 		}
@@ -225,15 +291,15 @@ namespace tinylr {
 				const size_t revi = dimm.dim() - i;
 				
 				for(size_t j = 0; j < revi; ++j) {
-					temp[j] -= temp[i] * pat(j, i);
+					temp[j] -= temp[i] * at(j, i);
 				}
 			}
 		}
 	};
 	
-	template<typename Num, pivot::strategy pstrat = pivot::absmax, typename Dim>
-	Matrix<Num, Dim, pstrat> make_matrix(const Dim& d) {
-		return Matrix<Num, Dim, pstrat>(d);
+	template<typename Num, pivot::strategy pstrat = pivot::absmax, bool invert_diagonal = true, typename Dim>
+	Matrix<Num, Dim, pstrat, invert_diagonal> make_matrix(const Dim& d) {
+		return Matrix<Num, Dim, pstrat, invert_diagonal>(d);
 	}
 }
 
