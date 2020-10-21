@@ -4,7 +4,7 @@
 #include <iostream>
 
 namespace tinylr {
-	template<typename Mat>
+	template<bool inverted = false, typename Mat>
 	void print(const Mat& mat) {	
 		std::cout << "Pivots:";
 		
@@ -15,7 +15,7 @@ namespace tinylr {
 		std::cout << "LR" << std::endl;
 		for(size_t i = 0; i < mat.dim(); ++i) {
 			for(size_t j = 0; j < mat.dim(); ++j) {
-				std::cout << "  " << mat.at(i, j);
+				std::cout << "  " << ((inverted && Mat::invert_diagonal && i == j) ? 1.0 / mat.at(i, j) : mat.at(i, j));
 			}
 			std::cout << std::endl;
 		}

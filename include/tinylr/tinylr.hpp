@@ -5,6 +5,8 @@
 #include <vector>
 #include <cmath>
 
+#include <iostream>
+
 namespace tinylr {
 	namespace pivot {
 		enum strategy {
@@ -167,6 +169,7 @@ namespace tinylr {
 	struct Matrix {
 		using Number = Num;
 		using Storage = typename Dim::template Matrix<Num>;
+		using Vector = typename Dim::template Vector<Num>;
 		
 		static constexpr bool invert_diagonal = inv_diag;
 		
@@ -225,8 +228,8 @@ namespace tinylr {
 		}
 		
 		template<typename Tin, typename Tout>
-		void substitution(const Tin& in, Tout& out) const {
-			auto temp = dimm.template create_linear<Num>();
+		void vmult_inv(const Tin& in, Tout& out) const {
+			auto temp = dimm.template create_vector<Num>();
 			for(size_t i = 0; i < dimm.dim(); ++i)
 				temp[i] = in[pivots.get(i)];
 			
@@ -236,6 +239,29 @@ namespace tinylr {
 			for(size_t i = 0; i < dimm.dim(); ++i)
 				out[i] = temp[i];
 		}
+		
+		template<typename Tin, typename Tout>
+		void vmult(const Tin& in, Tout& out) const {
+			auto temp = dimm.template create_vector<Num>();
+			
+			// R matrix
+			for(size_t i = 0; i < dimm.dim(); ++i) {
+				Num buf = in[i];
+				for(size_t j = i + 1; j < dimm.dim(); ++j)
+					buf += at(i, j) * in[j];
+				temp[i] = buf;
+			}
+			
+			// L matrix
+			for(size_t i = 0; i < dimm.dim(); ++i) {
+				Num buf = invert_diagonal ? temp[i] / at(i, i) : temp[i] * at(i, i);
+				for(size_t j = 0; j < i; ++j) {
+					buf += at(i, j) * temp[i];					
+				}
+				out[pivots.get(i)] = buf;
+			}
+		}
+		
 		
 	private:
 		void process_step(size_t step) {
@@ -267,7 +293,7 @@ namespace tinylr {
 		}
 		
 		/** Forward substitution along L matrix */
-		void forward_substitution(typename Dim::template Vector<Num>& temp) {
+		void forward_substitution(typename Dim::template Vector<Num>& temp) const {
 			for(size_t i = 0; i < dimm.dim(); ++i) {
 				// Divide by diagonal of L matrix
 				// Since we store the the inverse diagonal, we have
@@ -284,13 +310,13 @@ namespace tinylr {
 		}
 		
 		/** Forward substitution along U matrix */
-		void backward_substitution(typename Dim::template Vector<Num>& temp) {
+		void backward_substitution(typename Dim::template Vector<Num>& temp) const {
 			// U matrix has diagonal 1, so no scaling required
 			
-			for(size_t i = 0; i < dimm.dim(); ++i) {
-				const size_t revi = dimm.dim() - i;
+			for(size_t revi = 0; revi < dimm.dim(); ++revi) {
+				const size_t i = dimm.dim() - revi - 1;
 				
-				for(size_t j = 0; j < revi; ++j) {
+				for(size_t j = 0; j < i; ++j) {
 					temp[j] -= temp[i] * at(j, i);
 				}
 			}
